@@ -1,0 +1,9 @@
+# Keep text normalised; mark the binary types this project touches.
+* text=auto
+
+*.iso binary
+*.bin binary
+*.tm2 binary
+*.ps2mc binary
+*.png binary
+*.patch -text

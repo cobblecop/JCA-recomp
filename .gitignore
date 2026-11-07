@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# Jackie Chan Adventures - PS2 static recompilation
+#
+# Nothing game-derived is ever committed: no disc image, no extracted
+# executable, no translated (generated) C++, no captured frames, no Ghidra
+# database or function maps. All of it is produced locally, by whoever builds
+# this, from their own copy of the game.
+# ---------------------------------------------------------------------------
+
+# ---- disc image, extracted executable, extracted assets ----
+/game/
+*.iso
+*.ISO
+*.bin
+SCES_*.*
+SLES_*.*
+SLUS_*.*
+SLPS_*.*
+SLPM_*.*
+*.SIP
+*.PUB
+*.tm2
+*.ids
+*.ps2mc
+mc0/
+mc1/
+
+# ---- generated translated code (output of ps2_recomp) ----
+PS2Recomp/ps2xRuntime/src/runner/
+PS2Recomp/ps2xRuntime/src/lib/gap_functions/
+PS2Recomp/ps2xRuntime/output/
+PS2Recomp/ps2xRuntime/include/ps2_recompiled_functions.h
+PS2Recomp/ps2xRuntime/include/ps2_recompiled_stubs.h
+
+# ---- build trees ----
+out/
+build/
+PS2Recomp/out/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CPackConfig.cmake
+CPackSourceConfig.cmake
+
+# ---- local working data: analysis, logs, captures, notes ----
+/local/
+
+# ---- runtime noise ----
+PS2Recomp/ps2_log.txt
+PS2Recomp/mt.txt
+PS2Recomp/st.txt
+PS2Recomp/run.lo
+*.log
+*.ppm
+*.pgm
+frame_*.png
+imgui.ini
+.renderchk/
+.freebuff/
+.cloud-attachments/
+
+# ---- compiled intermediates ----
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.tlog
+*.ipch

@@ -1,0 +1,36 @@
+Jackie Chan Adventures — PS2 static recompilation
+=================================================
+
+This project is an independent, fan-made interoperability effort. It is not
+affiliated with, endorsed by, sponsored by, or approved by Sony Interactive
+Entertainment, Atomi Entertainment, Eutechnyx, or any other rights holder.
+"Jackie Chan Adventures", "PlayStation" and "PlayStation 2" are trademarks of
+their respective owners. All game content — code, audio, video, textures,
+models, fonts, text and save data — remains the property of its owners.
+
+What this repository contains
+-----------------------------
+Original tooling, configuration and runtime code only:
+
+  * a vendored copy of PS2Recomp with this project's runtime fixes,
+  * the function-classification config used to translate the game,
+  * a helper that extracts the game executable from a disc image the user owns.
+
+No disc image, no extracted game executable, no generated (translated) C++, no
+extracted assets and no Ghidra databases or function maps are distributed here.
+All of those are produced locally by the person building the project, from a
+copy of the game they own.
+
+Redistribution
+--------------
+Owning a copy of a game does not grant the right to redistribute it or
+derivative works of it. Do not publish disc images, extracted executables or
+build output produced from them.
+
+Third-party components
+----------------------
+PS2Recomp — https://github.com/ran-j/PS2Recomp
+  Vendored under PS2Recomp/ and modified for this game. Licensed under the GNU
+  General Public License v3.0; see PS2Recomp/LICENSE and PS2Recomp/README.md.
+  PS2Recomp is itself derived from earlier open-source work by its authors and
+  contributors; their notices are preserved in that directory.
