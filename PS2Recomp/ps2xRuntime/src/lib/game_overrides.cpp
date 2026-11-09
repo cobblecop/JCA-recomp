@@ -1249,8 +1249,10 @@ namespace
                       // queue 3: wrapper copies 16 bytes from 0x337878
                       flagIndex = 3; resultBuf = 0x337878u;
                     }
-                    else if (workType == 0x10u || workType == 0x14u)
+                    else if (workType == 0xDu || workType == 0x10u || workType == 0x14u)
                     {
+                      // FUN_0023d268 submits the DMA-style type 0xD work item
+                      // after clearing flag[5] and spins on it (FUN_0023c4e8).
                       flagIndex = 5; resultBuf = 0;
                     }
                     else if (workType >= 0x16u && workType <= 0x19u)
@@ -1268,6 +1270,16 @@ namespace
                       }
                     }
                     WRITE8(0x337850u + flagIndex, 1u);
+                    // A submitter clears its queue's flag (FUN_0023c548) right
+                    // before handing the work item over, so any flag that is
+                    // still clear belongs to work this reply completes too
+                    // (3:OPEN, 0xD/0xE DMA items and friends share the channel
+                    // with the type-routed queues above).
+                    for (uint32_t i = 0u; i < 8u; ++i)
+                    {
+                      if (i != flagIndex && READ8(0x337850u + i) == 0u)
+                        WRITE8(0x337850u + i, 1u);
+                    }
                     // queue-6 extra routing (FUN_0023c818): the device-mask
                     // response words are also written through DAT_002e29c0
                     // (registered by FUN_0023d628's caller).
