@@ -1322,6 +1322,17 @@ namespace
               else
               {
                 const uint32_t client = READ32(pkt + 0x1Cu);
+                // Per-call RPC completion callback (libsifrpc stores it in the
+                // client data at +0x1C with its parameter at +0x20).  On real
+                // hardware the IOP's reply raises SIF command 0x8000000C and
+                // the EE-side handler runs this function; libraries such as
+                // libmc use it to publish results and signal the semaphore
+                // that their mcSync()/wait call blocks on.
+                uint32_t completionFunction = 0u;
+                uint32_t completionParameter = 0u;
+                uint32_t completionRecvAddr = 0u;
+                uint32_t completionParamBlock = 0u;
+                bool completionUsesMcBlock = false;
                 if (cmd == 0x8000000Au)
                 {
                   // Diagnostic: dump RPC call packets so the loadfile
@@ -1457,9 +1468,47 @@ namespace
                     request.receive = {READ32(pkt + 0x28u), READ32(pkt + 0x2Cu)};
                     request.endFunction = READ32(client + 0x1Cu);
                     request.endParameter = READ32(client + 0x20u);
+                    completionFunction = request.endFunction;
+                    completionParameter = request.endParameter;
+                    completionRecvAddr = request.receive.address;
+                    completionParamBlock = READ32(request.send.address + 0x1Cu);
+                    completionUsesMcBlock = (sid == 0x80000400u || sid == 0x80000480u);
 
                     ps2x::iop::RpcResult iopResult =
                         PS2IopTransport::handleRpc(runtime, rdram, ctx, request);
+
+                    // libmc drives its commands asynchronously and publishes
+                    // the reply from the completion handler at 0x29BB08: the
+                    // request's out-pointers are parked at 0x3C4F28/2C/30 and
+                    // the semaphore mcSync() waits on is 0x2E3F10.  Some mc
+                    // sends go out without that per-call callback, so replay
+                    // the same completion here or mcSync() never reports the
+                    // command and the card check spins forever.
+                    const bool willInvokeCompletion =
+                        completionFunction != 0u && completionFunction < 0x02000000u &&
+                        runtime->hasFunction(completionFunction);
+                    if (!willInvokeCompletion && (sid == 0x80000400u || sid == 0x80000480u))
+                    {
+                      // libmc's info buffer: _sceMcSendRpc copies the 0xC0-byte
+                      // command block here and the IOP writes the answer back
+                      // into it (type at +0, free at +4, format at +0x90).
+                      const uint32_t mcInfo = 0x3C5400u;
+                      const uint32_t out1 = READ32(0x3C4F28u);
+                      const uint32_t out2 = READ32(0x3C4F2Cu);
+                      const uint32_t out3 = READ32(0x3C4F30u);
+                      if (out1 != 0u && out1 < 0x02000000u)
+                        WRITE32(out1, READ32(mcInfo));
+                      if (out2 != 0u && out2 < 0x02000000u)
+                        WRITE32(out2, READ32(mcInfo + 4u));
+                      if (out3 != 0u && out3 < 0x02000000u)
+                        WRITE32(out3, READ32(mcInfo + 0x90u));
+                      const uint32_t mcCompletionSema = READ32(0x2E3F10u);
+                      if (mcCompletionSema != 0u && mcCompletionSema != 0xFFFFFFFFu)
+                      {
+                        runtime->eeScheduler().signalSemaphore(
+                            static_cast<int>(mcCompletionSema), true);
+                      }
+                    }
 
                     if (!iopResult.handled && sid == 0u)
                     {
@@ -1489,6 +1538,37 @@ namespace
                 // few dozen calls and every RPC fails with -1 forever.
                 WRITE32(pkt + 0x18u, 0);
                 WRITE32(pkt + 0x10u, READ32(pkt + 0x10u) & 0xFFFFFFFEu);
+
+                // Deliver the reply to the guest's completion callback, the
+                // way libsifrpc does when the RPC-done command arrives.
+                if (completionFunction != 0u && completionFunction < 0x02000000u &&
+                    runtime->hasFunction(completionFunction))
+                {
+                  WRITE32(client + 0x1Cu, 0u);   // libsifrpc clears it on delivery
+                  WRITE32(client + 0x20u, 0u);
+                  SET_GPR_S32(ctx, 2, 1);
+                  ctx->pc = getRegU32(ctx, 31);   // resume after the caller
+                  GuestInvocation invocation{};
+                  invocation.kind = GuestInvocationKind::RpcCallback;
+                  invocation.context = *ctx;
+                  invocation.context.pc = completionFunction;
+                  // libsifrpc hands the reply buffer over through its uncached
+                  // alias.  libmc's completion handler (0x29BB08) copies the
+                  // answer out of the request's parameter block - the 0xC0-byte
+                  // info buffer the IOP wrote - not the RPC's 4-byte result
+                  // word, so mc clients get that block instead.
+                  uint32_t replyBuffer = completionRecvAddr;
+                  if (completionUsesMcBlock && completionParamBlock != 0u &&
+                      completionParamBlock < 0x02000000u)
+                  {
+                    replyBuffer = completionParamBlock;
+                  }
+                  SET_GPR_U32(&invocation.context, 4, replyBuffer | 0x20000000u);
+                  SET_GPR_U32(&invocation.context, 5, completionParameter);
+                  SET_GPR_U32(&invocation.context, 29, runtime->eeScheduler().invocationStackTop());
+                  SET_GPR_U32(&invocation.context, 31, 0u);
+                  runtime->eeScheduler().invokeCurrent(std::move(invocation));
+                }
               }
             }
             SET_GPR_S32(ctx, 2, 1);          // command queued successfully
