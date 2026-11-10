@@ -32,11 +32,6 @@ extern "C" void ps2_guest_trace_dump(const char *reason);
 #define PS2_GAP_REGISTRY_AVAILABLE 1
 #endif
 
-// Hand-written translation of the Ghidra analysis gap at 0x267d28..0x267d4c
-// (src/lib/gap_functions/entry_gap_00267d28_0x267d28.cpp).
-extern void entry_gap_00267d28_0x267d28(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
-extern void entry_gap_00266da8_0x266da8(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
-
 // ---- APEMOD file helpers (self-contained ISO9660 + host0 resolution) ----
 namespace
 {
@@ -777,16 +772,10 @@ namespace
                   PS2_IF_TRACE({ std::fprintf(stderr, "[cfio] pump exit ret=%08x\n", getRegU32(ctx, 2)); });
               });
         }
-        // Ghidra analysis gap fix: the game JALRs to 0x267d28 (object-list
-        // init prologue called from 0x265fd0 vtable dispatch) but Ghidra's
-        // FUN_00267d00 ends at 0x267d24 and the next entry starts at 0x267d50,
-        // leaving 0x267d28..0x267d4c with no recompiled code.  Hand-written
-        // translation lives in src/lib/gap_functions/.
-        runtime.registerFunction(0x00267D28u, entry_gap_00267d28_0x267d28);
-        // Same vtable site also JALRs to 0x266da8 (Ghidra gap 0x266da8..0x266de4).
-        runtime.registerFunction(0x00266DA8u, entry_gap_00266da8_0x266da8);
-        // Every other recovered gap handler (derive_gap_map.py -> ps2_recomp ->
-        // gen_gap_registry.py).  A tree without the generated translation still
+        // Recovered gap handlers (derive_gap_map.py -> ps2_recomp ->
+        // gen_gap_registry.py), including the object-list init prologue at
+        // 0x267d28 and the vtable target at 0x266da8 that Ghidra left as
+        // unmapped gaps.  A tree without the generated translation still
         // builds, it just installs fewer handlers.
 #ifdef PS2_GAP_REGISTRY_AVAILABLE
         ps2_gap_registry::registerHandlers(runtime);
