@@ -132,9 +132,11 @@ cp local/artifacts/captures/output_gap/entry_gap_*.cpp \
 python3 tools/gen_gap_registry.py
 ```
 
-`configs/jca_config_gap.toml` is the template: set its `ghidra_output` to the map
-you exported and its `output` to the scratch directory used above. After that,
-build as usual; the runtime picks the handlers up through the generated
+`configs/jca_config_gap.toml` is the template: set its `ghidra_output` to
+`MAP_GAPS.csv` — the derived map from the first command, not the map you
+exported, or the recompiler still sees the gaps as uncovered and translates
+nothing new — and set its `output` to the scratch directory used above. After
+that, build as usual; the runtime picks the handlers up through the generated
 `gap_registry.inc`, and a tree without any of this still compiles and runs, it
 just installs fewer recovered functions.
 
