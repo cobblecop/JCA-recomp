@@ -749,6 +749,21 @@ uint16_t PS2Memory::read16(uint32_t address)
     return 0;
 }
 
+// CSR value as the guest sees it, with the FINISH bit reflecting that this GS is
+// immediate: every queued GIF packet is processed synchronously, so an empty GIF
+// queue *is* the FINISH condition. Without the latch an EE that polls CSR bit 1
+// hangs forever, because the FINISH tag it queued was already consumed before it
+// started to poll and the write-one-to-clear that ended the previous wait removed
+// the bit again.
+static uint64_t effectiveGsCsr(std::atomic<uint64_t> &csr, bool gifIdle)
+{
+    uint64_t value = csr.load(std::memory_order_acquire);
+    if ((value & 0x2ull) != 0ull || !gifIdle)
+        return value;
+    csr.fetch_or(0x2ull, std::memory_order_acq_rel);
+    return value | 0x2ull;
+}
+
 uint32_t PS2Memory::read32(uint32_t address)
 {
     if (address & 3)
@@ -762,7 +777,7 @@ uint32_t PS2Memory::read32(uint32_t address)
         const uint32_t regOff = (address - PS2_GS_PRIV_REG_BASE) & ~0x7u;
         if (regOff == kGsCsrRegOffset)
         {
-            uint64_t val = gs_regs.csr.load();
+            uint64_t val = effectiveGsCsr(gs_regs.csr, m_gifArbiter == nullptr || m_gifArbiter->empty());
             return (uint32_t)(val >> (off * 8));
         }
         uint64_t *reg = gsRegPtr(gs_regs, address);
@@ -809,7 +824,7 @@ uint64_t PS2Memory::read64(uint32_t address)
         const uint32_t regOff = (address - PS2_GS_PRIV_REG_BASE) & ~0x7u;
         if (regOff == kGsCsrRegOffset)
         {
-            return gs_regs.csr.load();
+            return effectiveGsCsr(gs_regs.csr, m_gifArbiter == nullptr || m_gifArbiter->empty());
         }
         uint64_t *reg = gsRegPtr(gs_regs, address);
         return reg ? *reg : 0;
@@ -2467,7 +2482,7 @@ uint32_t PS2Memory::readIORegister(uint32_t address)
         const uint32_t regOff = (address - PS2_GS_PRIV_REG_BASE) & ~0x7u;
         if (regOff == kGsCsrRegOffset)
         {
-            return static_cast<uint32_t>((gs_regs.csr.load() >> (off * 8u)) & 0xFFFFFFFFull);
+            return static_cast<uint32_t>((effectiveGsCsr(gs_regs.csr, m_gifArbiter == nullptr || m_gifArbiter->empty()) >> (off * 8u)) & 0xFFFFFFFFull);
         }
         if (uint64_t *reg = gsRegPtr(gs_regs, address))
         {

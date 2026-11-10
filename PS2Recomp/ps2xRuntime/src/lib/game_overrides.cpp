@@ -24,6 +24,14 @@
 // of the most recent guest control transfers.
 extern "C" void ps2_guest_trace_dump(const char *reason);
 
+// Translated Ghidra analysis gaps (src/lib/gap_functions/) are game-derived, so
+// they are not part of the repository: they are regenerated locally and listed
+// in gap_registry.inc, which declares and installs them.
+#if __has_include("gap_functions/gap_registry.inc")
+#include "gap_functions/gap_registry.inc"
+#define PS2_GAP_REGISTRY_AVAILABLE 1
+#endif
+
 // Hand-written translation of the Ghidra analysis gap at 0x267d28..0x267d4c
 // (src/lib/gap_functions/entry_gap_00267d28_0x267d28.cpp).
 extern void entry_gap_00267d28_0x267d28(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime);
@@ -777,6 +785,12 @@ namespace
         runtime.registerFunction(0x00267D28u, entry_gap_00267d28_0x267d28);
         // Same vtable site also JALRs to 0x266da8 (Ghidra gap 0x266da8..0x266de4).
         runtime.registerFunction(0x00266DA8u, entry_gap_00266da8_0x266da8);
+        // Every other recovered gap handler (derive_gap_map.py -> ps2_recomp ->
+        // gen_gap_registry.py).  A tree without the generated translation still
+        // builds, it just installs fewer handlers.
+#ifdef PS2_GAP_REGISTRY_AVAILABLE
+        ps2_gap_registry::registerHandlers(runtime);
+#endif
         // HLE sceSifSendCmd (0x2ba1d0).  Args: $a0=cmd, $a1=pkt, $a2=size,
         // $a3=srcExtra, $t0=dstExtra, $t1=sizeExtra.  The game's SIF RPC stack
         // sends INIT/BIND/CALL commands to the IOP and then blocks on a sema
