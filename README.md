@@ -13,8 +13,15 @@ the build compiles it into a normal executable you can run.
 
 ## Status
 
-It boots and renders, controller input works, and the language-select and
-memory-card screens behave. Bringing up the rest of the game is ongoing.
+It boots and renders: the intro logos, the language-select screen, the
+memory-card check, the title screen and the level-loading screen all display
+correctly. The Chinatown level load now gets past its loading bar and into the
+first scene, where it stops on a piece of game code the translator has not
+covered yet. Bringing up the rest of the game is ongoing.
+
+Controller emulation works (PADMAN replies, and a scripted gamepad is written
+into the pad area the game registers), but the game does not yet react to it on
+the title and level screens, so interactivity is still being worked on.
 
 ## Build and play
 
@@ -22,19 +29,23 @@ Run all commands from the top folder of this project (the one containing this
 README). Steps 2 and 4 are the slow ones — the final build compiles the ~33k
 generated files and links a large (~1.4 GB) executable.
 
+The build uses Ninja and (on Linux) the mold linker.
+
 ### What you need
 
 - Your own PAL copy of the game (`SCES-52412`, Europe/Australia release),
   ripped to a plain `.iso` file (a 1:1 copy of the disc). Other rip formats
   (`.chd` or cue/bin) must be converted first — see step 1.
-- CMake 3.21+ and a C++20 compiler (GCC or Clang on Linux, MSVC on Windows).
-  The first configure step downloads raylib from GitHub, so you need an
-  internet connection.
+- CMake 3.21+, Ninja and a C++20 compiler (GCC or Clang on Linux, MSVC on
+  Windows). The first configure step downloads raylib from GitHub, so you need
+  an internet connection.
+- On Linux, the mold linker. It is ELF-only, so it does not apply on Windows;
+  the build works without it, but links are slower.
 - An SSE4-capable CPU (any x86-64 desktop of the last ~15 years).
 - On Linux, the OpenGL/X11 and FFmpeg development packages:
 
   ```bash
-  sudo apt-get install -y build-essential cmake ninja-build pkg-config \
+  sudo apt-get install -y build-essential cmake ninja-build mold pkg-config \
       libgl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
       libxi-dev libavcodec-dev libavformat-dev libavutil-dev \
       libswresample-dev libswscale-dev
@@ -62,11 +73,19 @@ A `.chd` or raw cue/bin rip must be converted to `.iso` first, e.g. with
 ### 2. Build the translator
 
 The first configure downloads raylib from GitHub, so you need internet access.
+One `out/build` directory is used for every step below, so they all have to be
+configured with the same generator; if you already have a directory there from
+an older Makefile-based build, delete it (or pick another name for `-B` and use
+that path everywhere).
 
 ```bash
-cmake -S PS2Recomp -B PS2Recomp/out/build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake -S PS2Recomp -B PS2Recomp/out/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=mold
 cmake --build PS2Recomp/out/build --target ps2_recomp -j"$(nproc)"
 ```
+
+Drop the `-DCMAKE_EXE_LINKER_FLAGS=...` argument if you do not have mold.
 
 ### 3. Translate the game code
 
@@ -80,7 +99,7 @@ Rewrites the game's code as ~33k C++ files under
 ### 4. Build the game
 
 Compiles the generated files and links the final executable — this is the long
-step; expect around half an hour on a recent machine:
+step; expect roughly half an hour of compiling on a recent machine:
 
 ```bash
 cmake --build PS2Recomp/out/build --target ps2EntryRunner -j"$(nproc)"
@@ -95,9 +114,11 @@ The runner takes the extracted game program, not the ISO:
 ```
 
 On Windows the steps are the same, but pass `--config Release` to the build
-commands, replace `-j"$(nproc)"` with a plain core count (e.g. `-j8`), and
-look for the executables in `Release\` subdirectories of the paths above;
+commands, replace `-j"$(nproc)"` with a plain core count (e.g. `-j8`), drop the
+mold linker flag (mold is Linux/ELF only) and look for the executables in
+`Release\` subdirectories of the paths above;
 `PS2Recomp/.github/workflows/build.yml` shows the reference toolchain setup.
+Keeping `-G Ninja` there is fine if ninja is installed and on `PATH`.
 
 ### Controls
 
