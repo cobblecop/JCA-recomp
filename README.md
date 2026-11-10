@@ -96,6 +96,48 @@ Rewrites the game's code as ~33k C++ files under
 ./PS2Recomp/out/build/ps2xRecomp/ps2_recomp configs/jca_config.toml
 ```
 
+The recompiler also writes two generated tables, `ps2_recompiled_functions.h`
+and `ps2_recompiled_stubs.h`, into that `runner` directory. The runtime includes
+them by name from its include directory, so copy them over before building
+(re-run this copy whenever you translate again):
+
+```bash
+cp PS2Recomp/ps2xRuntime/src/runner/ps2_recompiled_functions.h \
+   PS2Recomp/ps2xRuntime/src/runner/ps2_recompiled_stubs.h \
+   PS2Recomp/ps2xRuntime/include/
+```
+
+Both are generated files and are gitignored, so the copy leaves the repository
+clean.
+
+### 3b. Optional: recover code the function map misses
+
+A Ghidra function map does not cover every reachable instruction. The code it
+skips is never translated, and when the game jumps into it the runtime logs
+`[missing-fn] target=0x...` and stops making progress there. Since no map ships
+with this repository, a plain build stops earlier than the state described at
+the top of this file. These steps recover it.
+
+Export a map first, with `PS2Recomp/ps2xRecomp/tools/ghidra/ExportPS2Functions.java`
+run inside Ghidra, and point `ghidra_output` at the CSV. Then split the code the
+map does not cover into functions (`0x110000 0x2c0000` is this game's
+translatable range), translate it, and register the result:
+
+```bash
+mkdir -p PS2Recomp/ps2xRuntime/src/lib/gap_functions
+python3 tools/derive_gap_map.py MAP.csv MAP_GAPS.csv 0x110000 0x2c0000 --tails
+./PS2Recomp/out/build/ps2xRecomp/ps2_recomp configs/jca_config_gap.toml
+cp local/artifacts/captures/output_gap/entry_gap_*.cpp \
+   PS2Recomp/ps2xRuntime/src/lib/gap_functions/
+python3 tools/gen_gap_registry.py
+```
+
+`configs/jca_config_gap.toml` is the template: set its `ghidra_output` to the map
+you exported and its `output` to the scratch directory used above. After that,
+build as usual; the runtime picks the handlers up through the generated
+`gap_registry.inc`, and a tree without any of this still compiles and runs, it
+just installs fewer recovered functions.
+
 ### 4. Build the game
 
 Compiles the generated files and links the final executable — this is the long
