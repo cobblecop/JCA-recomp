@@ -19,6 +19,7 @@ set(PS2ANALYZER_LIB_SOURCES
     src/elf_analysis_context.cpp
     src/elf_analyzer.cpp
     src/function_classifier.cpp
+    src/map_emitter.cpp
     src/sce_symbol_scanner.cpp
     src/toml_generator.cpp
 )
