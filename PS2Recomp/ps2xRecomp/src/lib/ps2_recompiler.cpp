@@ -22,6 +22,8 @@
 #include <functional>
 #include <thread>
 #include <iomanip>
+#include <cstdio>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -293,15 +295,28 @@ namespace ps2recomp
             return text.str();
         }
 
-        // Validate the function map before translating. A stale map, one taken
-        // from a different executable or a hand-edited one still translates a
-        // whole tree, and nothing later notices that it cannot boot. Keep these
-        // checks in step with tools/check_function_map.py.
+        struct FunctionMapSummary
+        {
+            std::size_t entries = 0;
+            std::size_t selectors = 0;
+            uint32_t rangeStart = 0;
+            uint32_t rangeEnd = 0;
+            uint32_t coveredBytes = 0;
+            std::size_t holes = 0;
+            uint32_t largestHole = 0;
+        };
+
+        // The single implementation of the function-map rules: a stale map, one
+        // taken from a different executable or a hand-edited one still
+        // translates a whole tree, and nothing later notices that it cannot
+        // boot. tools/check_function_map.py only runs this (via
+        // ps2_recomp --check-map), so the two cannot disagree.
         std::vector<std::string> validateFunctionMap(
             const std::string &mapPath,
             const std::vector<Section> &sections,
             uint32_t entryPoint,
-            const std::vector<std::string> &requiredSelectors)
+            const std::vector<std::string> &requiredSelectors,
+            FunctionMapSummary *summary = nullptr)
         {
             std::vector<std::string> problems;
 
@@ -329,6 +344,7 @@ namespace ps2recomp
             }
 
             std::unordered_set<uint32_t> starts;
+            std::vector<std::pair<uint32_t, uint32_t>> rows;
             std::string line;
             int lineNumber = 1;
             bool havePrevious = false;
@@ -404,8 +420,34 @@ namespace ps2recomp
                 }
 
                 starts.insert(start);
+                rows.emplace_back(start, end);
                 previousStart = start;
                 havePrevious = true;
+            }
+
+            if (summary != nullptr)
+            {
+                summary->entries = rows.size();
+                summary->selectors = requiredSelectors.size();
+                if (!rows.empty())
+                {
+                    summary->rangeStart = rows.front().first;
+                    uint32_t reach = rows.front().first;
+                    for (const auto &row : rows)
+                    {
+                        if (row.first > reach)
+                        {
+                            ++summary->holes;
+                            summary->largestHole = std::max(summary->largestHole, row.first - reach);
+                        }
+                        if (row.second > reach)
+                        {
+                            summary->coveredBytes += row.second - std::max(row.first, reach);
+                            reach = row.second;
+                        }
+                    }
+                    summary->rangeEnd = reach;
+                }
             }
 
             if (starts.find(entryPoint) == starts.end())
@@ -997,6 +1039,98 @@ namespace ps2recomp
         m_reporter.printSummary(std::cout);
     }
 
+    bool PS2Recompiler::runFunctionMapChecks()
+    {
+        if (m_config.ghidraMapPath.empty())
+        {
+            return true;
+        }
+
+        std::vector<std::string> requiredSelectors = m_config.stubImplementations;
+        requiredSelectors.insert(requiredSelectors.end(), m_config.skipFunctions.begin(), m_config.skipFunctions.end());
+        requiredSelectors.insert(requiredSelectors.end(), m_config.entryPointHints.begin(), m_config.entryPointHints.end());
+
+        FunctionMapSummary summary;
+        const std::vector<std::string> problems = validateFunctionMap(
+            m_config.ghidraMapPath, m_sections, m_elfParser->getEntryPoint(), requiredSelectors, &summary);
+
+        std::ostringstream status;
+        status << "map:      " << m_config.ghidraMapPath << "\n";
+        status << "entries:  " << summary.entries << "\n";
+        if (summary.entries > 0)
+        {
+            const uint32_t span = summary.rangeEnd - summary.rangeStart;
+            const double coverage = span == 0 ? 0.0
+                                              : 100.0 * static_cast<double>(summary.coveredBytes) /
+                                                    static_cast<double>(span);
+            char coverageText[16];
+            std::snprintf(coverageText, sizeof(coverageText), "%.2f", coverage);
+            status << "range:    0x" << std::hex << std::uppercase << std::setw(8) << std::setfill('0')
+                   << summary.rangeStart << " - 0x" << std::setw(8) << summary.rangeEnd << std::dec
+                   << " (" << span << " bytes, " << coverageText << "% covered)\n";
+            if (summary.holes > 0)
+            {
+                status << "uncovered: " << summary.holes << " hole(s), largest " << summary.largestHole
+                       << " bytes\n";
+            }
+        }
+        status << "selectors: " << summary.selectors << " checked\n";
+        status << "elf:      " << m_config.inputPath << "\n";
+        std::cout << status.str();
+
+        constexpr std::size_t kMaxReported = 100;
+        for (std::size_t index = 0; index < problems.size() && index < kMaxReported; ++index)
+        {
+            m_reporter.error("ghidra-map", problems[index]);
+        }
+        if (problems.size() > kMaxReported)
+        {
+            m_reporter.error("ghidra-map",
+                             std::to_string(problems.size() - kMaxReported) + " more problem(s) not shown");
+        }
+        if (!problems.empty())
+        {
+            m_reporter.error("ghidra-map",
+                             "Refusing to translate with an inconsistent function map; "
+                             "run tools/check_function_map.py for the full report.");
+            return false;
+        }
+
+        std::cout << "map OK\n";
+        return true;
+    }
+
+    bool PS2Recompiler::checkFunctionMap()
+    {
+        // Same validation as initialize(), without translating anything.
+        try
+        {
+            m_config = m_configManager.loadConfig();
+        }
+        catch (const std::exception &error)
+        {
+            m_reporter.error("config", error.what());
+            return false;
+        }
+
+        if (m_config.ghidraMapPath.empty())
+        {
+            m_reporter.error("ghidra-map", "config has no ghidra_output; nothing to check");
+            return false;
+        }
+
+        m_elfParser = std::make_unique<ElfParser>(m_config.inputPath);
+        m_elfParser->setReporter(&m_reporter);
+        if (!m_elfParser->parse())
+        {
+            m_reporter.error("elf", "Failed to parse ELF file: " + m_config.inputPath);
+            return false;
+        }
+
+        m_sections = m_elfParser->getSections();
+        return runFunctionMapChecks();
+    }
+
     bool PS2Recompiler::initialize()
     {
         try
@@ -1079,33 +1213,9 @@ namespace ps2recomp
             m_relocations = m_elfParser->getRelocations();
             collectCorrectnessCriticalFunctionStarts();
 
-            if (!m_config.ghidraMapPath.empty())
+            if (!runFunctionMapChecks())
             {
-                std::vector<std::string> requiredSelectors = m_config.stubImplementations;
-                requiredSelectors.insert(requiredSelectors.end(), m_config.skipFunctions.begin(), m_config.skipFunctions.end());
-                requiredSelectors.insert(requiredSelectors.end(), m_config.entryPointHints.begin(), m_config.entryPointHints.end());
-
-                const std::vector<std::string> mapProblems = validateFunctionMap(
-                    m_config.ghidraMapPath, m_sections, m_elfParser->getEntryPoint(), requiredSelectors);
-
-                if (!mapProblems.empty())
-                {
-                    constexpr std::size_t kMaxReported = 10;
-                    for (std::size_t index = 0; index < mapProblems.size() && index < kMaxReported; ++index)
-                    {
-                        m_reporter.error("ghidra-map", mapProblems[index]);
-                    }
-                    if (mapProblems.size() > kMaxReported)
-                    {
-                        m_reporter.error("ghidra-map",
-                                         std::to_string(mapProblems.size() - kMaxReported) +
-                                             " more problem(s) not shown");
-                    }
-                    m_reporter.error("ghidra-map",
-                                     "Refusing to translate with an inconsistent function map; "
-                                     "run tools/check_function_map.py for the full report.");
-                    return false;
-                }
+                return false;
             }
 
             if (m_functions.empty())

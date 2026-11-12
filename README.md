@@ -201,9 +201,10 @@ instructions, no data - produced during development by the Ghidra export
 because the translated tree depends on it: without the map the recompiler
 classifies from the ELF's relocations alone, prints a warning, and translates a
 tree that does not boot. Verify the map against your extracted program with
-`python3 tools/check_function_map.py`. The recompiler runs the same checks
-itself before it translates and refuses a map that fails them, so a stale or
-half-regenerated map cannot quietly produce a build that does not boot.
+`python3 tools/check_function_map.py`, which runs the recompiler's own
+`--check-map` mode — the checks compile into the translator and run before it
+emits anything, so a stale or half-regenerated map cannot quietly produce a
+build that does not boot, and there is no second copy of the rules to drift.
 Regenerate the map with the Ghidra export, or let the analyzer build a config
 from scratch (build the analyzer target first):
 

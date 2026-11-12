@@ -31,6 +31,7 @@ namespace ps2recomp
         ~PS2Recompiler();
 
         bool initialize();
+        bool checkFunctionMap();
         bool recompile();
         void generateOutput();
         void printReport() const;
@@ -77,6 +78,7 @@ namespace ps2recomp
         std::unordered_map<uint32_t, std::vector<uint32_t>> m_resumeEntryTargetsByOwner;
         CodeGenerator::BootstrapInfo m_bootstrapInfo;
 
+        bool runFunctionMapChecks();
         bool decodeFunction(Function &function);
         void discoverAdditionalEntryPoints();
         bool shouldSkipFunction(const Function &function) const;
