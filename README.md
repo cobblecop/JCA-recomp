@@ -85,7 +85,11 @@ cmake -S PS2Recomp -B PS2Recomp/out/build -G Ninja \
 cmake --build PS2Recomp/out/build --target ps2_recomp -j"$(nproc)"
 ```
 
-Drop the `-DCMAKE_EXE_LINKER_FLAGS=...` argument if you do not have mold.
+Drop the `-DCMAKE_EXE_LINKER_FLAGS=...` argument if you do not have mold. If
+`ccache` is installed, add
+`-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache` to
+the configure line: the first build fills the cache and later rebuilds of the
+generated tree hit it.
 
 ### 3. Translate the game code
 
@@ -197,8 +201,11 @@ instructions, no data - produced during development by the Ghidra export
 because the translated tree depends on it: without the map the recompiler
 classifies from the ELF's relocations alone, prints a warning, and translates a
 tree that does not boot. Verify the map against your extracted program with
-`python3 tools/check_function_map.py`; regenerate it with the Ghidra export, or
-let the analyzer build a config from scratch (build the analyzer target first):
+`python3 tools/check_function_map.py`. The recompiler runs the same checks
+itself before it translates and refuses a map that fails them, so a stale or
+half-regenerated map cannot quietly produce a build that does not boot.
+Regenerate the map with the Ghidra export, or let the analyzer build a config
+from scratch (build the analyzer target first):
 
 ```bash
 cmake --build PS2Recomp/out/build --target ps2_analyzer -j"$(nproc)"

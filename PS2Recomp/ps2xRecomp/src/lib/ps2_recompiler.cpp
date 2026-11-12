@@ -21,6 +21,7 @@
 #include <limits>
 #include <functional>
 #include <thread>
+#include <iomanip>
 
 namespace fs = std::filesystem;
 
@@ -270,6 +271,164 @@ namespace ps2recomp
 
             selector.name = trimmed;
             return selector;
+        }
+
+        bool isExecutableMapAddress(const std::vector<Section> &sections, uint32_t address)
+        {
+            for (const auto &section : sections)
+            {
+                if (section.isCode && section.size > 0 &&
+                    address >= section.address && address < (section.address + section.size))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        std::string formatMapAddress(uint32_t address)
+        {
+            std::ostringstream text;
+            text << "0x" << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << address;
+            return text.str();
+        }
+
+        // Validate the function map before translating. A stale map, one taken
+        // from a different executable or a hand-edited one still translates a
+        // whole tree, and nothing later notices that it cannot boot. Keep these
+        // checks in step with tools/check_function_map.py.
+        std::vector<std::string> validateFunctionMap(
+            const std::string &mapPath,
+            const std::vector<Section> &sections,
+            uint32_t entryPoint,
+            const std::vector<std::string> &requiredSelectors)
+        {
+            std::vector<std::string> problems;
+
+            std::ifstream file(mapPath);
+            if (!file.is_open())
+            {
+                problems.push_back("cannot open " + mapPath);
+                return problems;
+            }
+
+            std::string header;
+            if (!std::getline(file, header))
+            {
+                problems.push_back(mapPath + ": empty function map");
+                return problems;
+            }
+            while (!header.empty() && (header.back() == '\r' || header.back() == ' '))
+            {
+                header.pop_back();
+            }
+            if (header != "Name,Start,End,Size")
+            {
+                problems.push_back(mapPath + ":1: expected header Name,Start,End,Size");
+                return problems;
+            }
+
+            std::unordered_set<uint32_t> starts;
+            std::string line;
+            int lineNumber = 1;
+            bool havePrevious = false;
+            uint32_t previousStart = 0;
+
+            while (std::getline(file, line))
+            {
+                ++lineNumber;
+                if (line.empty())
+                {
+                    continue;
+                }
+
+                std::stringstream fields(line);
+                std::string name;
+                std::string startText;
+                std::string endText;
+                std::string sizeText;
+                std::ostringstream where;
+                where << mapPath << ":" << lineNumber << ": ";
+
+                if (!std::getline(fields, name, ',') ||
+                    !std::getline(fields, startText, ',') ||
+                    !std::getline(fields, endText, ',') ||
+                    !std::getline(fields, sizeText, ','))
+                {
+                    problems.push_back(where.str() + "expected 4 columns");
+                    continue;
+                }
+
+                if (name.empty())
+                {
+                    name = "<unnamed>";
+                }
+
+                uint32_t start = 0;
+                uint32_t end = 0;
+                uint32_t size = 0;
+                try
+                {
+                    start = static_cast<uint32_t>(std::stoul(startText, nullptr, 0));
+                    end = static_cast<uint32_t>(std::stoul(endText, nullptr, 0));
+                    size = static_cast<uint32_t>(std::stoul(sizeText, nullptr, 0));
+                }
+                catch (...)
+                {
+                    problems.push_back(where.str() + name + ": unparsable row");
+                    continue;
+                }
+
+                if (size == 0 || end <= start || (end - start) != size)
+                {
+                    std::ostringstream message;
+                    message << where.str() << name << ": size " << size
+                            << " does not match end-start "
+                            << static_cast<int64_t>(end) - static_cast<int64_t>(start);
+                    problems.push_back(message.str());
+                }
+                if ((start & 3u) != 0)
+                {
+                    problems.push_back(where.str() + name + ": start " + formatMapAddress(start) +
+                                       " is not 4-byte aligned");
+                }
+                if (!isExecutableMapAddress(sections, start))
+                {
+                    problems.push_back(where.str() + name + ": start " + formatMapAddress(start) +
+                                       " is outside the executable sections");
+                }
+                if (havePrevious && start <= previousStart)
+                {
+                    problems.push_back(where.str() + name + ": start " + formatMapAddress(start) +
+                                       " is not after the previous entry " + formatMapAddress(previousStart));
+                }
+
+                starts.insert(start);
+                previousStart = start;
+                havePrevious = true;
+            }
+
+            if (starts.find(entryPoint) == starts.end())
+            {
+                problems.push_back("ELF entry point " + formatMapAddress(entryPoint) + " is not a map entry");
+            }
+
+            for (const std::string &selectorText : requiredSelectors)
+            {
+                const FunctionSelector selector = parseFunctionSelector(selectorText);
+                if (!selector.start.has_value())
+                {
+                    problems.push_back("selector '" + selectorText + "' has no Name@0xADDR address");
+                    continue;
+                }
+                if (starts.find(*selector.start) == starts.end())
+                {
+                    problems.push_back("selector '" + selectorText + "' (" + formatMapAddress(*selector.start) +
+                                       ") is not a map entry start");
+                }
+            }
+
+            return problems;
         }
 
         struct EntryDiscoveryStats
@@ -919,6 +1078,35 @@ namespace ps2recomp
             m_sections = m_elfParser->getSections();
             m_relocations = m_elfParser->getRelocations();
             collectCorrectnessCriticalFunctionStarts();
+
+            if (!m_config.ghidraMapPath.empty())
+            {
+                std::vector<std::string> requiredSelectors = m_config.stubImplementations;
+                requiredSelectors.insert(requiredSelectors.end(), m_config.skipFunctions.begin(), m_config.skipFunctions.end());
+                requiredSelectors.insert(requiredSelectors.end(), m_config.entryPointHints.begin(), m_config.entryPointHints.end());
+
+                const std::vector<std::string> mapProblems = validateFunctionMap(
+                    m_config.ghidraMapPath, m_sections, m_elfParser->getEntryPoint(), requiredSelectors);
+
+                if (!mapProblems.empty())
+                {
+                    constexpr std::size_t kMaxReported = 10;
+                    for (std::size_t index = 0; index < mapProblems.size() && index < kMaxReported; ++index)
+                    {
+                        m_reporter.error("ghidra-map", mapProblems[index]);
+                    }
+                    if (mapProblems.size() > kMaxReported)
+                    {
+                        m_reporter.error("ghidra-map",
+                                         std::to_string(mapProblems.size() - kMaxReported) +
+                                             " more problem(s) not shown");
+                    }
+                    m_reporter.error("ghidra-map",
+                                     "Refusing to translate with an inconsistent function map; "
+                                     "run tools/check_function_map.py for the full report.");
+                    return false;
+                }
+            }
 
             if (m_functions.empty())
             {
