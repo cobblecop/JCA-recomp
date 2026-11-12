@@ -463,7 +463,35 @@ namespace ps2_game_overrides
         if (appliedCount > 0)
         {
             RUNTIME_LOG("[game_overrides] applied " << appliedCount << " matching override(s).");
+            return;
         }
+
+        // No descriptor matched. This binary still starts, but it will run the
+        // guest without any of the bindings the game needs, so say so loudly
+        // and name what this build does support instead of dying silently.
+        std::cerr << "[game_overrides] WARNING: no game override matched ELF '" << elfName
+                  << "' (entry 0x" << std::hex << entry << std::dec << ")" << std::endl;
+        std::cerr << "[game_overrides] this build only supports:" << std::endl;
+        for (const Descriptor &descriptor : descriptors)
+        {
+            const char *name = (descriptor.name && descriptor.name[0] != '\0')
+                                   ? descriptor.name
+                                   : "unnamed";
+            std::cerr << "[game_overrides]   '" << name << "' expects ELF '"
+                      << (descriptor.elfName ? descriptor.elfName : "") << "'";
+            if (descriptor.entry != 0u)
+            {
+                std::cerr << " entry 0x" << std::hex << descriptor.entry << std::dec;
+            }
+            if (descriptor.crc32 != 0u)
+            {
+                std::cerr << " crc32 0x" << std::hex << descriptor.crc32 << std::dec;
+            }
+            std::cerr << std::endl;
+        }
+        std::cerr << "[game_overrides] continuing without overrides; the game will almost "
+                     "certainly fail to boot."
+                  << std::endl;
     }
 }
 
