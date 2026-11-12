@@ -18,6 +18,47 @@
 #endif
 #endif
 
+namespace gs_debug
+{
+    namespace
+    {
+        std::atomic<uint32_t> s_frame{0u};
+
+        void setFrame(uint32_t frame)
+        {
+            s_frame.store(frame, std::memory_order_relaxed);
+        }
+    }
+
+    uint32_t frame()
+    {
+        return s_frame.load(std::memory_order_relaxed);
+    }
+
+    // Host presentation counter: the same numbering the frame dumps use, and
+    // independent of the (normally paused) debug history.
+    void nextHostFrame()
+    {
+        setFrame(s_frame.load(std::memory_order_relaxed) + 1u);
+    }
+
+    bool window(const char *name)
+    {
+        const char *spec = std::getenv(name);
+        if (!spec || spec[0] == '\0')
+            return false;
+        if (spec[0] == '1' && spec[1] == '\0')
+            return true;
+
+        unsigned first = 0u;
+        unsigned last = 0u;
+        if (std::sscanf(spec, "%u:%u", &first, &last) != 2)
+            return false;
+        const uint32_t current = frame();
+        return current >= first && current <= last;
+    }
+}
+
 namespace
 {
     static constexpr uint32_t kHostFrameWidth = 640u;
@@ -110,6 +151,7 @@ namespace
     std::atomic<uint32_t> s_debugTexaWriteCount{0};
     std::atomic<uint32_t> s_debugCvFontUploadCount{0};
     std::atomic<uint32_t> s_debugLocalCopyCount{0};
+    std::atomic<uint32_t> s_debugDrawCount{0};
 }
 
 
@@ -534,6 +576,7 @@ GSPresentationRequest GS::buildPresentationRequestUnlocked() const
 
 void GS::latchHostPresentationFrame()
 {
+    gs_debug::nextHostFrame();
     GSPresentationRequest request{};
     {
         std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
@@ -560,6 +603,13 @@ void GS::latchHostPresentationFrame()
     }
 
     const bool hasFrame = static_cast<bool>(frame);
+    if (gs_debug::window("PS2_TEXDBG"))
+    {
+        std::fprintf(stderr, "[draw] f=%u batches=%u srcFbp=%u dispFbp=%u pref=%d hasFrame=%d\n",
+                     gs_debug::frame(), s_debugDrawCount.load(std::memory_order_relaxed), frame.sourceFbp, frame.displayFbp,
+                     request.hasPreferredSource ? 1 : 0, hasFrame ? 1 : 0);
+    }
+    s_debugDrawCount.store(0u, std::memory_order_relaxed);
     const uint32_t displayFbp = frame.displayFbp;
     const uint32_t sourceFbp = frame.sourceFbp;
     const uint32_t width = frame.width;
@@ -1317,6 +1367,21 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
         t.csm = static_cast<uint8_t>((value >> 55) & 0x1);
         t.csa = static_cast<uint8_t>((value >> 56) & 0x1F);
         t.cld = static_cast<uint8_t>((value >> 61) & 0x7);
+        // PS2_TEXDBG=<first>:<last>: trace the texture state each frame uses,
+        // so a level's TEX0/CLUT setup can be compared with what was uploaded.
+        if (gs_debug::window("PS2_TEXDBG"))
+        {
+            std::fprintf(stderr,
+                         "[tex0] f=%u ctxt=%d tbp0=%u tbw=%u psm=%u tw=%u th=%u tcc=%u tfx=%u "
+                         "cbp=%u cpsm=%u csm=%u csa=%u cld=%u store=%08x ra=%08x\n",
+                         gs_debug::frame(), ci, t.tbp0, static_cast<unsigned>(t.tbw),
+                         static_cast<unsigned>(t.psm), static_cast<unsigned>(t.tw),
+                         static_cast<unsigned>(t.th), static_cast<unsigned>(t.tcc),
+                         static_cast<unsigned>(t.tfx), t.cbp, static_cast<unsigned>(t.cpsm),
+                         static_cast<unsigned>(t.csm), static_cast<unsigned>(t.csa),
+                         static_cast<unsigned>(t.cld), ps2_guest_debug::last_store_pc,
+                         ps2_guest_debug::last_store_ra);
+        }
         // PS2_GUESTDBG=1: name the EE instruction that set an atlas-based
         // texture (the font page) so the setup routine can be identified.
         if (const char *gd = std::getenv("PS2_GUESTDBG"); gd && gd[0] == '1' && t.tbp0 == 7680u)
@@ -1707,6 +1772,7 @@ void GS::vertexKick(bool drawing)
         GSPrimitiveBatch batch = buildDrawBatch(needed);
         updatePreferredDisplaySourceForDraw(batch);
         m_backend->Submit(batch);
+        ++s_debugDrawCount;
         recordDrawDebugEventUnlocked(needed);
     }
 

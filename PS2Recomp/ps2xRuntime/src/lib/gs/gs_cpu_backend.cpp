@@ -23,6 +23,13 @@
 #include <iostream>
 #include <stdexcept>
 
+// Defined in gs_frontend.cpp: frame index and `first:last` trace windows.
+namespace gs_debug
+{
+    uint32_t frame();
+    bool window(const char *name);
+}
+
 using namespace GSInternal;
 
 namespace
@@ -2466,6 +2473,26 @@ void GSCpuBackend::BeginTransfer(const GSTransferCommand &command)
     std::lock_guard<std::mutex> lock(m_mutex);
     flushPlaneIfValid();
 
+    if (gs_debug::window("PS2_TEXDBG"))
+    {
+        std::fprintf(stderr,
+                     "[xfer] f=%u dir=%u dbp=%u dbw=%u dpsm=%u sbp=%u sbw=%u spsm=%u "
+                     "dsax=%u dsay=%u rrw=%u rrh=%u ssax=%u ssay=%u\n",
+                     gs_debug::frame(), static_cast<unsigned>(command.direction),
+                     static_cast<unsigned>(command.bitbltbuf.dbp),
+                     static_cast<unsigned>(command.bitbltbuf.dbw),
+                     static_cast<unsigned>(command.bitbltbuf.dpsm),
+                     static_cast<unsigned>(command.bitbltbuf.sbp),
+                     static_cast<unsigned>(command.bitbltbuf.sbw),
+                     static_cast<unsigned>(command.bitbltbuf.spsm),
+                     static_cast<unsigned>(command.trxpos.dsax),
+                     static_cast<unsigned>(command.trxpos.dsay),
+                     static_cast<unsigned>(command.trxreg.rrw),
+                     static_cast<unsigned>(command.trxreg.rrh),
+                     static_cast<unsigned>(command.trxpos.ssax),
+                     static_cast<unsigned>(command.trxpos.ssay));
+    }
+
     if (const char *xd = std::getenv("PS2_XFERDBG"); xd && xd[0] == '1')
     {
         static uint32_t s_xferN = 0u;
@@ -2548,6 +2575,16 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
                             { claimedPages.push_back(page); });
         markTextureUploadPages(claimedPages);
     }
+    if (gs_debug::window("PS2_TEXDBG"))
+    {
+        std::fprintf(stderr,
+                     "[upload] f=%u dbp=%u dbw=%u dpsm=%u dsax=%u dsay=%u rrw=%u rrh=%u size=%u pages=%zu\n",
+                     gs_debug::frame(), dbp, dbw, static_cast<unsigned>(dpsm),
+                     static_cast<unsigned>(dsax), static_cast<unsigned>(m_transfer.trxpos.dsay),
+                     rrw, static_cast<unsigned>(m_transfer.trxreg.rrh), sizeBytes,
+                     claimedPages.size());
+    }
+
     uint32_t offset = 0u;
 
     if (const char *xd = std::getenv("PS2_XFERDBG"); xd && xd[0] == '1')
