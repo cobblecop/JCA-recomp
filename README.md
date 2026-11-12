@@ -102,6 +102,12 @@ python3 tools/check_function_map.py
 ./PS2Recomp/out/build/ps2xRecomp/ps2_recomp configs/jca_config.toml
 ```
 
+`python3 tools/test_check_function_map.py` is the gate's own test: it passes the
+committed map, then feeds the checker broken copies (size mismatch, misaligned
+start, out-of-order rows, damaged header) and a stub selector the map does not
+describe, and requires each one to be refused with a `map:line` reason and no
+translated output.
+
 The recompiler also writes two generated tables, `ps2_recompiled_functions.h`
 and `ps2_recompiled_stubs.h`, into that `runner` directory. The runtime includes
 them by name from its include directory, so copy them over before building
@@ -236,6 +242,10 @@ logs at Debug/Info level are also held back without it.
 
 Finer-grained switches exist per subsystem and are independent of it — for
 example `PS2_DMADBG`, `PS2_APEDBG`, `PS2_GIFTAGDBG` and `PS2_FUNC_TRACE`.
+`PS2_TEXDBG=<first>:<last>` (host frame numbers, the same numbering as the
+frame dumps) traces per-frame texture state: every `TEX0`/`TEX2` write
+(`[tex0]`), every host-to-local transfer and its image upload
+(`[xfer]`, `[upload]`) and the batch count sent to the rasterizer (`[draw]`).
 Boot progress messages (ELF load, module registration, override application)
 always print.
 
@@ -246,7 +256,7 @@ always print.
 | `PS2Recomp/` | Vendored PS2Recomp toolchain and runtime (GPL-3.0, upstream history in `PS2Recomp/README.md`), plus this project's runtime fixes. |
 | `PS2Recomp/ps2xRuntime/src/runner/` | The translated C++, generated on your machine by step 3. |
 | `configs/` | Translator configuration: the committed function map (`jca_map.csv`) and the classification of which functions are library stubs, which are skipped, what to patch. |
-| `tools/` | `extract_iso.py` — pulls the game executable out of your own disc image; `check_function_map.py` — verifies the committed function map against it. |
+| `tools/` | `extract_iso.py` — pulls the game executable out of your own disc image; `check_function_map.py` — verifies the committed function map against it; `test_check_function_map.py` — tests the gate itself. |
 | `game/` | Your disc image and the executable extracted from it (created by step 1). |
 | `local/` | Analysis output, logs and captures created while working on the project. |
 

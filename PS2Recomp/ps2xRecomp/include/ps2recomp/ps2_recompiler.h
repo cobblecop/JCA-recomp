@@ -79,6 +79,7 @@ namespace ps2recomp
         CodeGenerator::BootstrapInfo m_bootstrapInfo;
 
         bool runFunctionMapChecks();
+        bool m_checkMapOnly = false;
         bool decodeFunction(Function &function);
         void discoverAdditionalEntryPoints();
         bool shouldSkipFunction(const Function &function) const;

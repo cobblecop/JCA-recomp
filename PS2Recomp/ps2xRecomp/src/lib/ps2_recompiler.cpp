@@ -1082,6 +1082,12 @@ namespace ps2recomp
         for (std::size_t index = 0; index < problems.size() && index < kMaxReported; ++index)
         {
             m_reporter.error("ghidra-map", problems[index]);
+            // --check-map never prints the report summary, so the reasons have to
+            // reach the terminal here; the translator shows them in its report.
+            if (m_checkMapOnly)
+            {
+                std::cerr << "[error] ghidra-map - " << problems[index] << '\n';
+            }
         }
         if (problems.size() > kMaxReported)
         {
@@ -1128,6 +1134,7 @@ namespace ps2recomp
         }
 
         m_sections = m_elfParser->getSections();
+        m_checkMapOnly = true;
         return runFunctionMapChecks();
     }
 
