@@ -245,7 +245,11 @@ example `PS2_DMADBG`, `PS2_APEDBG`, `PS2_GIFTAGDBG` and `PS2_FUNC_TRACE`.
 `PS2_TEXDBG=<first>:<last>` (host frame numbers, the same numbering as the
 frame dumps) traces per-frame texture state: every `TEX0`/`TEX2` write
 (`[tex0]`), every host-to-local transfer and its image upload
-(`[xfer]`, `[upload]`) and the batch count sent to the rasterizer (`[draw]`).
+(`[xfer]`, `[upload]`), the batch count sent to the rasterizer (`[draw]`) and a
+per-frame summary of the draw calls grouped by primitive, texture and draw
+target (`[drawsum]`). `PS2_FRAME_DUMP_EVERY=1` dumps every presented frame
+instead of every fifth, and `PS2_VRAMDUMP=<frames>` writes the full 4 MiB of
+VRAM for the listed host frames (`vram_full_<frame>.bin`).
 Boot progress messages (ELF load, module registration, override application)
 always print.
 

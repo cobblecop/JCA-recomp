@@ -446,6 +446,30 @@ namespace
         return !g_texShadow.empty() && isTextureOwnedPage(page) && g_texDirtyPages[page] != 0u;
     }
 
+    // VRAM page (8 KB) a raster write lands in. `base` is the frame/zbuf base
+    // in 256-byte blocks and `bw` the buffer width in 64-pixel units, exactly
+    // as the PSM's page walk uses them (see PixelStorageTraits::PageId).
+    uint32_t pagedAddressOfPixel(uint8_t psm, uint32_t base, uint32_t bw, uint32_t x, uint32_t y)
+    {
+        const uint32_t basePage = base / 32u;
+        const uint32_t width = std::max<uint32_t>(bw, 1u);
+        switch (psm & 0x3Fu)
+        {
+        case GS_PSM_T4:
+            return basePage + (y >> 7) * std::max<uint32_t>(width >> 1, 1u) + (x >> 7);
+        case GS_PSM_T8:
+            return basePage + (y >> 6) * std::max<uint32_t>(width >> 1, 1u) + (x >> 7);
+        case GS_PSM_CT16:
+        case GS_PSM_CT16S:
+        case GS_PSM_Z16:
+        case GS_PSM_Z16S:
+            return basePage + (y >> 6) * width + (x >> 6);
+        default:
+            // CT32/CT24/Z32/Z24/P8H/P4HL/P4HH: 64x32 pages
+            return basePage + (y >> 5) * width + (x >> 6);
+        }
+    }
+
     uint8_t lerpChannel(uint8_t c00, uint8_t c10, uint8_t c01, uint8_t c11, float fx, float fy)
     {
         const float top = static_cast<float>(c00) + (static_cast<float>(c10) - static_cast<float>(c00)) * fx;
@@ -1116,7 +1140,10 @@ void GSCpuBackend::WriteVramUnlocked(uint32_t psm, uint32_t base, uint32_t bw, u
     // that texture's upload-time copy authoritative for later sampling (see
     // markTextureUploadPages). The write itself still goes through: the page is
     // simultaneously a colour surface the guest clears and displays.
-    noteRasterWriteToOwnedPage(base + (y >> 6) * std::max<uint32_t>(bw, 1u) + (x >> 6));
+    // The page number must be derived exactly like the texture walk does,
+    // otherwise the dirty flag lands on a different page and the sampler keeps
+    // reading the clobbered surface.
+    noteRasterWriteToOwnedPage(pagedAddressOfPixel(psm, base, bw, x, y));
 
     m_writeVramFuncs[psm & 0x3Fu](m_vram, base, bw, x, y, value);
 }

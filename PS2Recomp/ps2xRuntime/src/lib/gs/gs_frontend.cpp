@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <sstream>
 #if defined(__has_include)
 #if __has_include(<execinfo.h>)
@@ -152,6 +153,38 @@ namespace
     std::atomic<uint32_t> s_debugCvFontUploadCount{0};
     std::atomic<uint32_t> s_debugLocalCopyCount{0};
     std::atomic<uint32_t> s_debugDrawCount{0};
+
+    // PS2_TEXDBG frame summary: which (prim, texture, draw target) combinations
+    // the frame is made of, plus how much of the screen each covers.
+    std::atomic<bool> s_drawSummaryOn{false};
+    std::map<std::string, uint32_t> s_drawSummary;
+
+    void recordDrawSummary(const GSPrimitiveBatch &batch)
+    {
+        const auto &ctx = batch.state.context;
+        float minX = 1.0e9f, maxX = -1.0e9f, minY = 1.0e9f, maxY = -1.0e9f;
+        for (uint8_t index = 0; index < batch.vertexCount; ++index)
+        {
+            const GSVertex &v = batch.vertices[index];
+            minX = std::min(minX, v.x);
+            maxX = std::max(maxX, v.x);
+            minY = std::min(minY, v.y);
+            maxY = std::max(maxY, v.y);
+        }
+        char key[320];
+        std::snprintf(key, sizeof(key),
+                      "type=%u tme=%d abe=%d tfx=%d tex=%u/%u/%ux%u cbp=%u cpsm=%u "
+                      "draw=fbp%u/psm%u/fbw%u box=%dx%d",
+                      static_cast<unsigned>(batch.state.prim.type),
+                      batch.state.prim.tme ? 1 : 0, batch.state.prim.abe ? 1 : 0,
+                      static_cast<unsigned>(ctx.tex0.tfx),
+                      ctx.tex0.tbp0, static_cast<unsigned>(ctx.tex0.psm),
+                      batch.state.textureWidth, batch.state.textureHeight,
+                      ctx.tex0.cbp, static_cast<unsigned>(ctx.tex0.cpsm),
+                      ctx.frame.fbp, static_cast<unsigned>(ctx.frame.psm), ctx.frame.fbw,
+                      static_cast<int>(maxX - minX), static_cast<int>(maxY - minY));
+        ++s_drawSummary[key];
+    }
 }
 
 
@@ -603,11 +636,29 @@ void GS::latchHostPresentationFrame()
     }
 
     const bool hasFrame = static_cast<bool>(frame);
-    if (gs_debug::window("PS2_TEXDBG"))
+    const bool texTrace = gs_debug::window("PS2_TEXDBG");
+    s_drawSummaryOn.store(texTrace, std::memory_order_relaxed);
+    if (texTrace)
     {
-        std::fprintf(stderr, "[draw] f=%u batches=%u srcFbp=%u dispFbp=%u pref=%d hasFrame=%d\n",
-                     gs_debug::frame(), s_debugDrawCount.load(std::memory_order_relaxed), frame.sourceFbp, frame.displayFbp,
-                     request.hasPreferredSource ? 1 : 0, hasFrame ? 1 : 0);
+        std::fprintf(stderr,
+                     "[draw] f=%u batches=%u srcFbp=%u dispFbp=%u pref=%d hasFrame=%d "
+                     "dispfb1=%016llx display1=%016llx pmode=%016llx smode2=%016llx\n",
+                     gs_debug::frame(), s_debugDrawCount.load(std::memory_order_relaxed),
+                     frame.sourceFbp, frame.displayFbp, request.hasPreferredSource ? 1 : 0,
+                     hasFrame ? 1 : 0, static_cast<unsigned long long>(request.dispfb1),
+                     static_cast<unsigned long long>(request.display1),
+                     static_cast<unsigned long long>(request.pmode),
+                     static_cast<unsigned long long>(request.smode2));
+        std::vector<std::pair<uint32_t, std::string>> rows;
+        rows.reserve(s_drawSummary.size());
+        for (const auto &entry : s_drawSummary)
+            rows.emplace_back(entry.second, entry.first);
+        std::sort(rows.begin(), rows.end(),
+                  [](const auto &a, const auto &b) { return a.first > b.first; });
+        for (size_t i = 0; i < rows.size() && i < 40u; ++i)
+            std::fprintf(stderr, "[drawsum] f=%u n=%u %s\n", gs_debug::frame(), rows[i].first,
+                         rows[i].second.c_str());
+        s_drawSummary.clear();
     }
     s_debugDrawCount.store(0u, std::memory_order_relaxed);
     const uint32_t displayFbp = frame.displayFbp;
@@ -1773,6 +1824,8 @@ void GS::vertexKick(bool drawing)
         updatePreferredDisplaySourceForDraw(batch);
         m_backend->Submit(batch);
         ++s_debugDrawCount;
+        if (s_drawSummaryOn.load(std::memory_order_relaxed))
+            recordDrawSummary(batch);
         recordDrawDebugEventUnlocked(needed);
     }
 

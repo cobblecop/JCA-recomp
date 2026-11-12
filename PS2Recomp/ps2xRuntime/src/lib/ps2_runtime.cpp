@@ -571,6 +571,46 @@ static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint
     // Debug: also dump the GS draw-context framebuffer (ctx0 FRAME) directly
     // from VRAM, so we can see what the game rasterizes regardless of the
     // presentation path.
+    // Debug: full 4 MiB VRAM dump for chosen frames (PS2_VRAMDUMP=593,594,595).
+    {
+        static uint32_t s_fullVramCounter = 0u;
+        ++s_fullVramCounter;
+        const char *vramFrames = std::getenv("PS2_VRAMDUMP");
+        const char *vramDir = std::getenv("PS2_FRAME_DUMP_DIR");
+        if (vramFrames && vramDir && vramDir[0] != '\0')
+        {
+            char needle[16];
+            std::snprintf(needle, sizeof(needle), "%u", s_fullVramCounter);
+            bool wanted = false;
+            std::string list(vramFrames);
+            size_t start = 0u;
+            while (start <= list.size())
+            {
+                const size_t comma = list.find(',', start);
+                const std::string token = list.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+                if (token == needle)
+                {
+                    wanted = true;
+                    break;
+                }
+                if (comma == std::string::npos)
+                    break;
+                start = comma + 1u;
+            }
+            uint8_t *vram = wanted ? rt->memory().getGSVRAM() : nullptr;
+            if (vram)
+            {
+                char path[512];
+                std::snprintf(path, sizeof(path), "%s/vram_full_%06u.bin", vramDir, s_fullVramCounter);
+                if (std::FILE *vf = std::fopen(path, "wb"))
+                {
+                    std::fwrite(vram, 1u, 4u * 1024u * 1024u, vf);
+                    std::fclose(vf);
+                }
+            }
+        }
+    }
+
     {
         static uint32_t s_vramDumpCounter = 0u;
         ++s_vramDumpCounter;
@@ -638,9 +678,14 @@ static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint
     {
         static uint32_t s_frameDumpCounter = 0u;
         ++s_frameDumpCounter;
-        // TEMP: dump every 5th present-latch (was every 90) so headless test
-        // runs capture enough frames to observe menu transitions.
-        if ((s_frameDumpCounter % 5u) == 0u && width != 0u && height != 0u)
+        // Dump every 5th present-latch by default; PS2_FRAME_DUMP_EVERY=1
+        // captures every frame around a transition.
+        static const uint32_t s_dumpEvery = [] {
+            const char *every = std::getenv("PS2_FRAME_DUMP_EVERY");
+            const long value = every ? std::strtol(every, nullptr, 10) : 0;
+            return static_cast<uint32_t>(value > 0 ? value : 5);
+        }();
+        if ((s_frameDumpCounter % s_dumpEvery) == 0u && width != 0u && height != 0u)
         {
             const char *dumpDir = std::getenv("PS2_FRAME_DUMP_DIR");
             if (dumpDir && dumpDir[0] != '\0')
