@@ -89,6 +89,7 @@ namespace ps2recomp
         void collectCorrectnessCriticalFunctionStarts();
         bool generateFunctionHeader();
         bool generateStubHeader();
+        void pruneStaleOutput();
         bool writeToFile(const std::string &path, const std::string &content);
         std::filesystem::path getOutputPath(const Function &function) const;
         static std::string clampFilenameLength(const std::string& baseName, const std::string& extension, std::size_t maxLength);

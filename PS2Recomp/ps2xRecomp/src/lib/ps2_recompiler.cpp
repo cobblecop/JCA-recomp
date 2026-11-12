@@ -16,6 +16,7 @@
 #include <exception>
 #include <mutex>
 #include <queue>
+#include <set>
 #include <unordered_set>
 #include <optional>
 #include <limits>
@@ -2091,6 +2092,8 @@ namespace ps2recomp
             {
                 throw std::runtime_error("Failed to generate stub header");
             }
+
+            pruneStaleOutput();
         }
         catch (const std::exception &e)
         {
@@ -2152,6 +2155,68 @@ namespace ps2recomp
         {
             m_reporter.error("stub-header", e.what());
             return false;
+        }
+    }
+
+    void PS2Recompiler::pruneStaleOutput()
+    {
+        // A regenerated map (or analyzer config) can name the same address
+        // differently, e.g. sub_002C1DF8 before and FUN_002c1df8 after. The old
+        // files then stay behind, call each other by their old names and the
+        // tree no longer compiles. The output directory is generated as a
+        // whole, so anything this run did not write is stale.
+        if (m_config.singleFileOutput)
+        {
+            return;
+        }
+
+        std::error_code error;
+        const fs::path directory(m_config.outputPath);
+        if (!fs::is_directory(directory, error))
+        {
+            return;
+        }
+
+        std::set<std::string> keep;
+        for (const auto &function : m_functions)
+        {
+            if (shouldGenerateCodeForFunction(function))
+            {
+                keep.insert(getOutputPath(function).filename().string());
+            }
+        }
+        keep.insert("register_functions.cpp");
+        keep.insert("ps2_recompiled_functions.h");
+        keep.insert("ps2_recompiled_stubs.h");
+
+        size_t removed = 0u;
+        for (const auto &entry : fs::directory_iterator(directory, error))
+        {
+            if (!entry.is_regular_file(error))
+            {
+                continue;
+            }
+            const std::string extension = entry.path().extension().string();
+            if (extension != ".cpp" && extension != ".h")
+            {
+                continue;
+            }
+            if (keep.count(entry.path().filename().string()) != 0u)
+            {
+                continue;
+            }
+            std::error_code removeError;
+            if (fs::remove(entry.path(), removeError) && !removeError)
+            {
+                ++removed;
+            }
+        }
+
+        if (removed != 0u)
+        {
+            std::ostringstream msg;
+            msg << "removed " << removed << " stale generated file(s) from " << directory.string();
+            m_reporter.progress(msg.str());
         }
     }
 
