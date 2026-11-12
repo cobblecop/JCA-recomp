@@ -3,8 +3,10 @@
 #
 # Nothing game-derived is ever committed: no disc image, no extracted
 # executable, no translated (generated) C++, no captured frames, no Ghidra
-# database or function maps. All of it is produced locally, by whoever builds
-# this, from their own copy of the game.
+# database. What is committed is game configuration: the recompiler config and
+# its function map (configs/jca_map.csv) - addresses, extents and symbol names,
+# no instructions or data from the executable. Everything else is produced
+# locally, by whoever builds this, from their own copy of the game.
 # ---------------------------------------------------------------------------
 
 # ---- disc image, extracted executable, extracted assets ----

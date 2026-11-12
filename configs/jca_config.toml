@@ -7,14 +7,17 @@
 # - no SCE symbol database is used by this Ghidra script
 
 # Paths are relative to the repository root; run ps2_recomp from there.
-# ghidra_output is optional: the function map is a local analysis artifact
-# (gitignored). Without it the recompiler classifies from ELF relocations
-# alone; regenerate a map with the Ghidra export or ps2_analyzer.
+# ghidra_output is the committed function map for SCES_524.12: each row is an
+# address range with a symbol name, never code. It is what makes a build
+# translate the same tree on another machine; check it with
+# tools/check_function_map.py after any edit, and regenerate it with the Ghidra
+# export (PS2Recomp/ps2xRecomp/tools/ghidra/ExportPS2Functions.java) or
+# ps2_analyzer if the game program changes.
 
 [general]
 input = "game/SCES_524.12"
 output = "PS2Recomp/ps2xRuntime/src/runner"
-ghidra_output = "local/artifacts/decompilation/jca_map.csv"
+ghidra_output = "configs/jca_map.csv"
 single_file_output = false
 patch_syscalls = false
 patch_cop0 = true

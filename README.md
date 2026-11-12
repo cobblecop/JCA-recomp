@@ -90,9 +90,11 @@ Drop the `-DCMAKE_EXE_LINKER_FLAGS=...` argument if you do not have mold.
 ### 3. Translate the game code
 
 Rewrites the game's code as ~33k C++ files under
-`PS2Recomp/ps2xRuntime/src/runner/`:
+`PS2Recomp/ps2xRuntime/src/runner/`. Check the function map first (it takes a
+second and catches an edited or inconsistently regenerated map):
 
 ```bash
+python3 tools/check_function_map.py
 ./PS2Recomp/out/build/ps2xRecomp/ps2_recomp configs/jca_config.toml
 ```
 
@@ -112,16 +114,14 @@ clean.
 
 ### 3b. Optional: recover code the function map misses
 
-A Ghidra function map does not cover every reachable instruction. The code it
-skips is never translated, and when the game jumps into it the runtime logs
-`[missing-fn] target=0x...` and stops making progress there. Since no map ships
-with this repository, a plain build stops earlier than the state described at
-the top of this file. These steps recover it.
+The function map in `configs/jca_map.csv` does not cover every reachable
+instruction. The code it skips is never translated, and when the game jumps into
+it the runtime logs `[missing-fn] target=0x...` and stops making progress
+there. These steps recover it; only regenerate the map (Ghidra export, step 3)
+if your game program differs from the one it was produced from.
 
-Export a map first, with `PS2Recomp/ps2xRecomp/tools/ghidra/ExportPS2Functions.java`
-run inside Ghidra, and point `ghidra_output` at the CSV. Then split the code the
-map does not cover into functions (`0x110000 0x2c0000` is this game's
-translatable range), translate it, and register the result:
+Then split the code the map does not cover into functions (`0x110000 0x2c0000`
+is this game's translatable range), translate it, and register the result:
 
 ```bash
 mkdir -p PS2Recomp/ps2xRuntime/src/lib/gap_functions
@@ -190,12 +190,15 @@ Paths in the config are relative to the project's top folder, so run the tools
 from there, as in the steps above. `input` is your extracted `SCES_524.12` and
 `output` is where the translated C++ is written; neither should need editing.
 
-`ghidra_output` points at a function map produced by the Ghidra export
-(`PS2Recomp/ps2xRecomp/tools/ghidra/ExportPS2Functions.java`) during this
-project's development. That map is not needed to build — without it the
-recompiler classifies from the ELF's relocations alone and prints a warning.
-You can delete the line, point it at your own export, or let the analyzer
-build a config from scratch (build the analyzer target first):
+`ghidra_output` points at `configs/jca_map.csv`, the function map for this
+game's PAL executable. Each row is an address range with a symbol name - no
+instructions, no data - produced during development by the Ghidra export
+(`PS2Recomp/ps2xRecomp/tools/ghidra/ExportPS2Functions.java`). It is committed
+because the translated tree depends on it: without the map the recompiler
+classifies from the ELF's relocations alone, prints a warning, and translates a
+tree that does not boot. Verify the map against your extracted program with
+`python3 tools/check_function_map.py`; regenerate it with the Ghidra export, or
+let the analyzer build a config from scratch (build the analyzer target first):
 
 ```bash
 cmake --build PS2Recomp/out/build --target ps2_analyzer -j"$(nproc)"
@@ -234,8 +237,8 @@ always print.
 | --- | --- |
 | `PS2Recomp/` | Vendored PS2Recomp toolchain and runtime (GPL-3.0, upstream history in `PS2Recomp/README.md`), plus this project's runtime fixes. |
 | `PS2Recomp/ps2xRuntime/src/runner/` | The translated C++, generated on your machine by step 3. |
-| `configs/` | Function classification for the translator: which functions are library stubs, which are skipped, what to patch. |
-| `tools/` | `extract_iso.py` — pulls the game executable out of your own disc image. |
+| `configs/` | Translator configuration: the committed function map (`jca_map.csv`) and the classification of which functions are library stubs, which are skipped, what to patch. |
+| `tools/` | `extract_iso.py` — pulls the game executable out of your own disc image; `check_function_map.py` — verifies the committed function map against it. |
 | `game/` | Your disc image and the executable extracted from it (created by step 1). |
 | `local/` | Analysis output, logs and captures created while working on the project. |
 
@@ -246,9 +249,11 @@ Interactive Entertainment, Atomi Entertainment, Eutechnyx, or any other rights
 holder. "Jackie Chan Adventures" and all related marks and game content belong
 to their respective owners.
 
-You need to own the game to build this. Nothing in this repository is derived
-from the game's assets or executable, and nothing built from it may be
-redistributed. See `NOTICE`.
+You need to own the game to build this. The repository holds no game code or
+game assets: the function map under `configs/` is a table of addresses, extents
+and symbol names produced by analysing the executable, and contains no
+instructions or data from it. Nothing built from the game may be redistributed.
+See `NOTICE`.
 
 The project code is released under GPL-3.0; the vendored PS2Recomp toolchain
 and runtime are GPL-3.0 as well. See `LICENSE` and `PS2Recomp/LICENSE`.
